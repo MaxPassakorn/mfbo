@@ -1,0 +1,104 @@
+cff-version: 1.2.0
+message: >
+  If you use this software in academic work, please cite the following paper.
+
+title: mfbo
+version: 0.1.0
+date-released: 2026-02-21
+license: MIT
+
+authors:
+  - family-names: Paladaechanan
+    given-names: Passakorn
+    email: p.paladaechanan@gmail.com
+
+preferred-citation:
+  type: article
+  title: >
+    Ensemble adaptive gated multi-fidelity neural network for Bayesian optimization:
+    Application to hydrofoil design
+  authors:
+    - family-names: Paladaechanan
+      given-names: Passakorn
+    - family-names: Zhong
+      given-names: Yao
+    - family-names: Ye
+      given-names: Maokun
+    - family-names: Wan
+      given-names: Decheng
+    - family-names: Abdel-Maksoud
+      given-names: Moustafa
+  journal: Ocean Engineering
+  volume: 343
+  pages: 123314
+  year: 2026
+  publisher: Elsevier
+
+references:
+  - type: article
+    title: >
+      Ada2MF: Dual-adaptive multi-fidelity neural network approach and its application
+      in wind turbine wake prediction
+    authors:
+      - family-names: Zhan
+        given-names: Lingyu
+      - family-names: Wang
+        given-names: Zhenfan
+      - family-names: Chen
+        given-names: Yaoran
+      - family-names: Kuang
+        given-names: Limin
+      - family-names: Tu
+        given-names: Yu
+      - family-names: Zhou
+        given-names: Dai
+      - family-names: Han
+        given-names: Zhaolong
+      - family-names: Zhang
+        given-names: Kai
+    journal: Engineering Applications of Artificial Intelligence
+    volume: 137
+    pages: 109061
+    year: 2024
+    publisher: Elsevier
+
+  - type: article
+    title: >
+      A composite neural network that learns from multi-fidelity data:
+      Application to function approximation and inverse PDE problems
+    authors:
+      - family-names: Meng
+        given-names: Xuhui
+      - family-names: Karniadakis
+        given-names: George Em
+    journal: Journal of Computational Physics
+    volume: 401
+    pages: 109020
+    year: 2020
+    publisher: Elsevier
+
+  - type: article
+    title: Bayesian calibration of computer models
+    authors:
+      - family-names: Kennedy
+        given-names: Marc C
+      - family-names: O'Hagan
+        given-names: Anthony
+    journal: Journal of the Royal Statistical Society: Series B (Statistical Methodology)
+    volume: 63
+    issue: 3
+    pages: 425--464
+    year: 2001
+    publisher: Wiley
+
+  - type: article
+    title: >
+      A statistical approach to some basic mine valuation problems on the Witwatersrand
+    authors:
+      - family-names: Krige
+        given-names: Daniel G
+    journal: Journal of the Southern African Institute of Mining and Metallurgy
+    volume: 52
+    issue: 6
+    pages: 119--139
+    year: 1951
