@@ -82,4 +82,3 @@ please contact:
 
 **Passakorn Paladaechanan**  
 Email: p.paladaechanan@gmail.com
->>>>>>> 14417e8 (Initial commit: mfbo core library)
