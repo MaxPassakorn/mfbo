@@ -1,5 +1,17 @@
 from __future__ import annotations
 
+"""
+Co-kriging (multi-fidelity Gaussian processes).
+
+This module provides an autoregressive AR(1) co-kriging model (Kennedy–O’Hagan)
+implemented with GPyTorch and exposed through the BoTorch ``Model`` interface.
+
+Classes
+-------
+CoKrigingAR1
+    Autoregressive AR(1) co-kriging model for multi-fidelity data.
+"""
+
 from typing import Tuple
 
 import torch
@@ -15,7 +27,15 @@ from .kernels import Kriging
 
 class ExactKrigingGP(gpytorch.models.ExactGP):
     """
-    Exact GP using the Kriging kernel wrapped in a ScaleKernel.
+    Exact Gaussian process with a Kriging covariance.
+
+    Notes
+    -----
+    This model uses:
+
+    - a zero mean function (:class:`gpytorch.means.ZeroMean`)
+    - a Kriging kernel (:class:`~mfbo.gp.kernels.Kriging`) wrapped by
+      :class:`gpytorch.kernels.ScaleKernel`.
     """
     def __init__(self, train_x: Tensor, train_y: Tensor, likelihood: gpytorch.likelihoods.GaussianLikelihood, power: float = 1.5):
         super().__init__(train_x, train_y, likelihood)
@@ -30,19 +50,53 @@ class ExactKrigingGP(gpytorch.models.ExactGP):
 
 
 class CoKrigingAR1(Model, gpytorch.Module):
-    """
-    Autoregressive co-kriging (AR(1)):
+    r"""
+    Autoregressive AR(1) co-kriging model for multi-fidelity Gaussian processes.
 
-        y_H(x) ≈ rho * y_L(x) + δ(x)
+    The high-fidelity response is modeled as
 
-    Implementation:
-    - Fit low-fidelity GP on (X_low, y_low)
-    - Estimate rho (least squares on high points)
-    - Fit delta GP on residuals δ(x) = y_H(x) - rho*y_L(x) evaluated at X_high
+    .. math::
 
-    Multi-output:
-    - Builds one (low GP, delta GP) pair per output dimension.
-    - rho is a vector of length D.
+       y_H(x) \approx \rho \, y_L(x) + \delta(x),
+
+    where :math:`\rho` is an autoregressive scaling parameter and
+    :math:`\delta(x)` is a discrepancy Gaussian process.
+
+    Training procedure
+    ------------------
+    The implementation fits the model in three stages:
+
+    1. Fit a low-fidelity GP on ``(X_low, y_low)``.
+    2. Estimate :math:`\rho` by least squares using the low-fidelity GP
+       predictions at the high-fidelity locations ``X_high``.
+    3. Fit a discrepancy GP on residuals
+       ``y_high - rho * y_low_pred(X_high)``.
+
+    Multi-output support
+    --------------------
+    For vector-valued outputs (``D > 1``), the model constructs one pair of
+    (low-fidelity GP, discrepancy GP) per output dimension. In that case,
+    ``rho`` is a vector of length ``D``.
+
+    Parameters
+    ----------
+    X_low : torch.Tensor
+        Low-fidelity inputs with shape ``[nL, d]`` (or any array reshapeable
+        to ``[nL, d]``).
+    y_low : torch.Tensor
+        Low-fidelity outputs with shape ``[nL]`` or ``[nL, D]``.
+    X_high : torch.Tensor
+        High-fidelity inputs with shape ``[nH, d]`` (or any array reshapeable
+        to ``[nH, d]``).
+    y_high : torch.Tensor
+        High-fidelity outputs with shape ``[nH]`` or ``[nH, D]``.
+    power : float, default=1.5
+        Power parameter used by the Kriging kernel.
+
+    Attributes
+    ----------
+    rho : torch.nn.Parameter
+        Autoregressive scaling parameters with shape ``[D]``.
     """
 
     def __init__(self, X_low: Tensor, y_low: Tensor, X_high: Tensor, y_high: Tensor, power: float = 1.5):
@@ -89,9 +143,44 @@ class CoKrigingAR1(Model, gpytorch.Module):
 
     @property
     def num_outputs(self) -> int:
+        """
+        Number of output dimensions.
+
+        Returns
+        -------
+        int
+            The number of outputs ``D`` modeled by the co-kriging surrogate.
+            For scalar-valued problems, this is ``1``. For vector-valued
+            problems, a separate low-fidelity GP and discrepancy GP are
+            constructed for each output dimension.
+        """
         return self._num_outputs
 
     def _fit_rho(self) -> None:
+        r"""
+        Estimate the autoregressive scaling parameters ``rho``.
+
+        This routine computes a least-squares estimate of :math:`\rho` for each
+        output dimension using the current low-fidelity GP predictions evaluated
+        at the high-fidelity locations ``Xh``.
+
+        Notes
+        -----
+        For output dimension :math:`j`, this solves
+
+        .. math::
+
+            \rho_j = \arg\min_{\rho} \| y_{H,j} - \rho \, \hat{y}_{L,j}(X_H) \|_2^2,
+
+        which has the closed-form solution
+
+        .. math::
+
+            \rho_j = \frac{\hat{y}_{L,j}(X_H)^\top y_{H,j}}
+                        {\hat{y}_{L,j}(X_H)^\top \hat{y}_{L,j}(X_H)}.
+
+        The result is stored in-place in ``self.rho``.
+        """
         eps = 1e-12
         for d in range(self._num_outputs):
             low_gp = self.low_models[d]
@@ -110,6 +199,32 @@ class CoKrigingAR1(Model, gpytorch.Module):
         lr_delta: float = 0.05,
         verbose: bool = True,
     ) -> None:
+        """
+        Fit the AR(1) co-kriging model.
+
+        The training alternates between (i) fitting the low-fidelity GPs,
+        (ii) updating ``rho``, and (iii) fitting the discrepancy (delta) GPs.
+
+        Parameters
+        ----------
+        iters_per_stage : int, default=100
+            Number of optimizer iterations used to fit each GP per stage.
+        stages : int, default=3
+            Number of outer stages. Each stage refits the low-fidelity GPs, updates
+            ``rho``, and refits the discrepancy GPs.
+        lr_low : float, default=0.05
+            Learning rate for the low-fidelity GP optimizers.
+        lr_delta : float, default=0.05
+            Learning rate for the discrepancy GP optimizers.
+        verbose : bool, default=True
+            If True, prints per-iteration losses (every 10 iterations) and the
+            current ``rho`` values.
+
+        Notes
+        -----
+        This method performs in-place training and does not return anything.
+        After fitting, you can call :meth:`predict` or :meth:`posterior`.
+        """
         for s in range(stages):
             if verbose:
                 print(f"\n=== Stage {s+1}/{stages} ===")
@@ -162,10 +277,31 @@ class CoKrigingAR1(Model, gpytorch.Module):
 
     def predict(self, X: Tensor) -> Tuple[Tensor, Tensor]:
         """
-        X: [..., q, d] or [N, d]
-        Returns:
-            mean: [..., q, D]
-            std : [..., q, D]
+        Predict the mean and standard deviation at query points ``X``.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Query points with shape ``[..., q, d]`` or ``[N, d]``.
+            The method flattens the leading dimensions internally and restores the
+            original batch shape in the outputs.
+
+        Returns
+        -------
+        mean : torch.Tensor
+            Predictive mean with shape ``[..., q, D]`` (or ``[N, D]`` if ``X`` is
+            two-dimensional).
+        std : torch.Tensor
+            Predictive standard deviation with shape ``[..., q, D]`` (or ``[N, D]``).
+
+        Notes
+        -----
+        The predictive moments are combined as
+
+        - ``mean = rho * mean_low + mean_delta``
+        - ``var  = (rho**2) * var_low + var_delta``
+
+        assuming independence between the low-fidelity and discrepancy GPs.
         """
         Xf = X.reshape(-1, X.shape[-1]).to(torch.float64)
 
@@ -193,5 +329,22 @@ class CoKrigingAR1(Model, gpytorch.Module):
         return mean.view(*out_shape), std.view(*out_shape)
 
     def posterior(self, X: Tensor, **kwargs) -> Posterior:
+        """
+        Return a BoTorch-compatible posterior at ``X``.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Query points with shape ``[..., q, d]`` or ``[N, d]``.
+        **kwargs
+            Unused. Included for BoTorch API compatibility.
+
+        Returns
+        -------
+        botorch.posteriors.Posterior
+            A diagonal Normal posterior with batch shape matching ``X`` and event
+            shape ``D`` (number of outputs). The returned object is an instance of
+            :class:`~mfbo.posteriors.diag_normal.MFDiagNormalPosterior`.
+        """
         mean, std = self.predict(X)
         return MFDiagNormalPosterior(mean=mean, std=std)
