@@ -7,13 +7,19 @@ import gpytorch
 
 
 class Kriging(gpytorch.kernels.Kernel):
-    """
-    Power-exponential / generalized exponential kernel:
+    r"""
+    Power-exponential (generalized exponential) kernel.
 
-        k(x,x') = exp( - sum_j theta_j * |x_j - x'_j|^p )
+    .. math::
 
-    - theta_j > 0 learned directly (ARD supported)
-    - p (power) fixed hyperparameter
+       k(x, x') = \exp\left(
+           -\sum_{j=1}^{d} \theta_j \, \lvert x_j - x'_j \rvert^{p}
+       \right)
+
+    Notes
+    -----
+    - Uses ARD parameters :math:`\theta_j > 0` (learned directly).
+    - The exponent :math:`p` (``power``) is treated as a fixed hyperparameter.
     """
     has_lengthscale = False
     is_stationary = True

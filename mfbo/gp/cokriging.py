@@ -80,22 +80,22 @@ class CoKrigingAR1(Model, gpytorch.Module):
 
     Parameters
     ----------
-    X_low : torch.Tensor
+    X_low
         Low-fidelity inputs with shape ``[nL, d]`` (or any array reshapeable
         to ``[nL, d]``).
-    y_low : torch.Tensor
+    y_low
         Low-fidelity outputs with shape ``[nL]`` or ``[nL, D]``.
-    X_high : torch.Tensor
+    X_high
         High-fidelity inputs with shape ``[nH, d]`` (or any array reshapeable
         to ``[nH, d]``).
-    y_high : torch.Tensor
+    y_high
         High-fidelity outputs with shape ``[nH]`` or ``[nH, D]``.
-    power : float, default=1.5
+    power
         Power parameter used by the Kriging kernel.
 
     Attributes
     ----------
-    rho : torch.nn.Parameter
+    rho
         Autoregressive scaling parameters with shape ``[D]``.
     """
 
@@ -207,16 +207,16 @@ class CoKrigingAR1(Model, gpytorch.Module):
 
         Parameters
         ----------
-        iters_per_stage : int, default=100
+        iters_per_stage
             Number of optimizer iterations used to fit each GP per stage.
-        stages : int, default=3
+        stages
             Number of outer stages. Each stage refits the low-fidelity GPs, updates
             ``rho``, and refits the discrepancy GPs.
-        lr_low : float, default=0.05
+        lr_low
             Learning rate for the low-fidelity GP optimizers.
-        lr_delta : float, default=0.05
+        lr_delta
             Learning rate for the discrepancy GP optimizers.
-        verbose : bool, default=True
+        verbose
             If True, prints per-iteration losses (every 10 iterations) and the
             current ``rho`` values.
 
@@ -281,17 +281,17 @@ class CoKrigingAR1(Model, gpytorch.Module):
 
         Parameters
         ----------
-        X : torch.Tensor
+        X
             Query points with shape ``[..., q, d]`` or ``[N, d]``.
             The method flattens the leading dimensions internally and restores the
             original batch shape in the outputs.
 
         Returns
         -------
-        mean : torch.Tensor
+        mean
             Predictive mean with shape ``[..., q, D]`` (or ``[N, D]`` if ``X`` is
             two-dimensional).
-        std : torch.Tensor
+        std
             Predictive standard deviation with shape ``[..., q, D]`` (or ``[N, D]``).
 
         Notes
@@ -334,7 +334,7 @@ class CoKrigingAR1(Model, gpytorch.Module):
 
         Parameters
         ----------
-        X : torch.Tensor
+        X
             Query points with shape ``[..., q, d]`` or ``[N, d]``.
         **kwargs
             Unused. Included for BoTorch API compatibility.

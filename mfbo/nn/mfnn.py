@@ -16,21 +16,31 @@ class MFNN(nn.Module):
     r"""
     Multi-Fidelity Neural Network (MFNN) base architecture.
 
-    For each output dimension e:
-      z_lin = Linear(x)
-      z_nl  = MLP(x)
-      a     = sigmoid(alpha_e)
-      y_e   = a * z_lin + (1 - a) * z_nl
+    For each output dimension :math:`e`, MFNN blends a linear head and a nonlinear
+    (MLP) head with a learnable mixing weight:
 
-    Input:
-      x: [N, d] (or flattenable to [N, d])
-    Output:
-      y: [N] if out_features=1 else [N, out_features]
+    .. math::
 
-    Notes:
-    - This file defines ONLY the network.
-    - Any concatenation with low-fidelity features (x, yL) happens outside,
-      typically inside an ensemble wrapper.
+       z_{\mathrm{lin}}(x) &= \mathrm{Linear}(x), \\
+       z_{\mathrm{nl}}(x)  &= \mathrm{MLP}(x), \\
+       a_e                &= \sigma(\alpha_e), \\
+       y_e(x)             &= a_e \, z_{\mathrm{lin}}(x) + (1-a_e)\, z_{\mathrm{nl}}(x).
+
+    Input
+    -----
+    x
+        Tensor of shape ``[N, d]`` (or flattenable to ``[N, d]``).
+
+    Output
+    ------
+    y
+        Tensor of shape ``[N]`` if ``out_features = 1``; otherwise ``[N, out_features]``.
+
+    Notes
+    -----
+    - This file defines **only** the neural network architecture.
+    - Any coupling with low-fidelity features (e.g., concatenating ``(x, y_L)``) is handled
+      outside this module, typically in an ensemble wrapper.
     """
 
     def __init__(
