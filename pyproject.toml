@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mfbo"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Multi-fidelity surrogate models (NN ensembles and co-kriging) compatible with BoTorch."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -13,6 +13,9 @@ license-files = ["LICENSE*"]
 authors = [
   { name = "Passakorn Paladaechanan" }
 ]
+
+[tool.setuptools.dynamic]
+version = { attr = "mfbo._version.__version__" }
 
 dependencies = [
   "torch>=2.5",
