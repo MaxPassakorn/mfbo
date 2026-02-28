@@ -1,5 +1,27 @@
 from __future__ import annotations
 
+"""
+AGMFNet ensemble surrogate.
+
+This module defines :class:`~mfbo.nn.ensembles.agmfnet.AGMFNetEnsemble`, a
+deterministic ensemble surrogate built from multiple independently trained
+:class:`~mfbo.nn.agmfnet.AGMFNet` networks.
+
+Each ensemble member models a high-fidelity response using both:
+
+- inputs ``x``
+- low-fidelity features ``y_L(x)`` provided by a user-supplied callable ``low_fn``
+
+The ensemble returns predictive samples with shape ``[B, M, q, E]`` where:
+
+- ``B``: broadcast batch dimension
+- ``M``: ensemble size
+- ``q``: number of query points
+- ``E``: number of outputs
+
+Posterior construction is inherited from :class:`~mfbo.nn.ensembles.base._BaseEnsemble`.
+"""
+
 from typing import Callable
 
 import torch
@@ -26,11 +48,63 @@ LowFn = Callable[[Tensor], Tensor]
 
 class AGMFNetEnsemble(_BaseEnsemble):
     """
-    Deterministic AGMFNet ensemble.
+    Deterministic ensemble of AGMFNet networks for multi-fidelity regression.
 
-    Each AGMFNet net consumes (x, yL(x)) and outputs yH prediction (mu).
-    - forward(X) returns samples: [B, M, q, E]
-    - posterior(X) inherited from _BaseEnsemble
+    The ensemble approximates a high-fidelity mapping ``x -> y_H`` by
+    augmenting inputs with low-fidelity features ``y_L(x)`` produced by
+    ``low_fn``. Each ensemble member is an independently initialized and
+    trained :class:`~mfbo.nn.agmfnet.AGMFNet` network.
+
+    Parameters
+    ----------
+    X_train : torch.Tensor
+        High-fidelity training inputs of shape ``[N, d]`` (or any tensor
+        flattenable to that).
+    y_train : torch.Tensor
+        High-fidelity training targets of shape ``[N]`` or ``[N, E]``.
+    low_fn : Callable[[torch.Tensor], torch.Tensor]
+        Low-fidelity function used to generate features ``y_L(x)``.
+        Must accept an input tensor of shape ``[N, d]`` and return either
+        ``[N]`` or ``[N, f_L]``.
+    ensemble_size : int, default=50
+        Number of ensemble members ``M``.
+    hid_features : int, default=5
+        Hidden layer width used inside each :class:`~mfbo.nn.agmfnet.AGMFNet`.
+    n_layers : int, default=2
+        Number of hidden layers used inside each :class:`~mfbo.nn.agmfnet.AGMFNet`.
+
+    Attributes
+    ----------
+    low_fn : Callable
+        Stored low-fidelity function.
+    nets : torch.nn.ModuleList
+        List of :class:`~mfbo.nn.agmfnet.AGMFNet` ensemble members.
+    train_x : torch.Tensor
+        Training inputs, shape ``[N, d]``.
+    train_y : torch.Tensor
+        Training targets, shape ``[N, E]``.
+    ensemble_size : int
+        Number of ensemble members ``M``.
+    _num_outputs : int
+        Number of output dimensions ``E``.
+
+    Notes
+    -----
+    **Uncertainty**:
+        This class is deterministic; uncertainty is estimated from disagreement
+        across ensemble members.
+
+    **Two kinds of weights are used**:
+
+    1. *Model-internal gate weights* (per sample):
+       Each :class:`~mfbo.nn.agmfnet.AGMFNet` has a gating network that outputs
+       a softmax weight vector over three branches (linear-on-``[x,y_L]``,
+       nonlinear-on-``[x,y_L]``, nonlinear-on-``x``). These vary with ``x``.
+
+    2. *Adaptive loss weights (AFW)* (per output dimension):
+       During training, this ensemble optionally reweights three loss terms
+       using a dual update in log-loss space. AFW is a training-time mechanism
+       and does not change the model's inference interface.
     """
 
     def __init__(
@@ -78,6 +152,63 @@ class AGMFNetEnsemble(_BaseEnsemble):
         cfg: FitConfig | None = None,
         **kwargs,  # supports optimizer=..., epochs=..., lr=...
     ) -> None:
+        """
+        Fit all AGMFNet ensemble members independently using adaptive loss weighting.
+
+        Parameters
+        ----------
+        cfg : FitConfig or None, optional
+            Training configuration (optimizer, learning rate, number of epochs,
+            loss name, verbosity). If ``None``, defaults are used.
+        **kwargs
+            Legacy keyword arguments forwarded to :func:`cfg_from_legacy_kwargs`.
+            Typical keys include ``optimizer``, ``epochs``, ``lr``, ``loss``,
+            and ``verbose``.
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Each ensemble member is trained on the same dataset using the input
+        augmentation:
+
+        - ``y_L = low_fn(X_train)``
+        - model input is ``(X_train, y_L)``
+
+        Loss decomposition (per output dimension)
+        -----------------------------------------
+        For each output dimension, training uses three Huber losses:
+
+        - ``L_H``  : mismatch between predicted high-fidelity mean ``mu`` and ``y_H``
+        - ``L_LH`` : mismatch between the combined low-fidelity branches ``(g1 + g2)``
+                    and ``y_H``
+        - ``L_R``  : mismatch between the residual branch ``g3`` and the residual target
+                    ``(y_H - y_L)``
+
+        These are stacked into a vector ``L = [L_H, L_LH, L_R]`` and combined using
+        adaptive weights ``w`` per output dimension:
+
+        - ``L_total(e) = sum_k w_e[k] * L_e[k]``
+
+        Adaptive loss weighting (AFW)
+        -----------------------------
+        AFW maintains a per-output parameter vector ``u`` and converts it to weights
+        via a softmax:
+
+        - ``w = softmax(u)``
+
+        After each optimizer step, AFW updates ``u`` using a dual update based on
+        differences of log-loss values (before vs. after the step). The update is
+        performed per output dimension and clipped for numerical stability.
+
+        Logging
+        -------
+        The progress bar reports the total loss and the mean AFW weights over
+        outputs. If the underlying network returns gate weights, their dataset-mean
+        values are also logged.
+        """
         cfg = cfg_from_legacy_kwargs(cfg, **kwargs)
 
         y_train = self.train_y
@@ -199,8 +330,33 @@ class AGMFNetEnsemble(_BaseEnsemble):
 
     def forward(self, X: Tensor) -> Tensor:
         """
-        X: [d] or [q,d] or [B,q,d]
-        Returns samples: [B, M, q, E]
+        Evaluate ensemble predictions at query points.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Query inputs with shape ``[d]``, ``[q, d]``, or ``[B, q, d]``.
+
+        Returns
+        -------
+        torch.Tensor
+            Predictive samples with shape ``[B, M, q, E]``, where:
+
+            - ``B`` is the broadcast batch dimension
+            - ``M`` is the ensemble size
+            - ``q`` is the number of query points
+            - ``E`` is the number of outputs
+
+        Notes
+        -----
+        Inputs are normalized to ``[B, q, d]`` internally and flattened to
+        ``[B*q, d]`` for evaluation. Low-fidelity features are computed by
+
+        - ``y_L = low_fn(X)``
+
+        and each ensemble member predicts using :class:`~mfbo.nn.agmfnet.AGMFNet`.
+        The returned tensor stacks predictions from all ensemble members along the
+        ensemble dimension ``M``.
         """
         Xb = normalize_to_bqd(X)     # [B,q,d]
         B, q, d = Xb.shape

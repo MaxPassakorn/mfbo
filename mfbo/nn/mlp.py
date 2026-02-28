@@ -3,24 +3,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 import torch.nn as nn
-
-
-def init_linear_kaiming(lin: nn.Linear, nonlinearity: str = "relu") -> None:
-    """
-    Initialize a ``nn.Linear`` layer using Kaiming (He) initialization.
-
-    Parameters
-    ----------
-    lin : torch.nn.Linear
-        Linear layer to initialize.
-    nonlinearity : str, default="relu"
-        Nonlinearity used after the layer. Passed to
-        :func:`torch.nn.init.kaiming_normal_`.
-    """
-    nn.init.kaiming_normal_(lin.weight, nonlinearity=nonlinearity)
-    if lin.bias is not None:
-        nn.init.zeros_(lin.bias)
-
+from ..utils.init import init_linear_kaiming
 
 class MLP(nn.Module):
     r"""

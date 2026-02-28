@@ -1,5 +1,26 @@
 from __future__ import annotations
 
+"""
+Ada2MF ensemble surrogate.
+
+This module defines :class:`~mfbo.nn.ensembles.ada2mf.Ada2MFEnsemble`, a
+deterministic ensemble surrogate built from multiple independent
+:class:`~mfbo.nn.ada2mf.Ada2MF` networks.
+
+Each ensemble member models the high-fidelity response using both the original
+inputs ``x`` and low-fidelity features ``y_L(x)`` produced by a user-supplied
+callable ``low_fn``.
+
+The ensemble returns predictive samples with shape ``[B, M, q, E]``:
+
+- ``B``: broadcast batch dimension
+- ``M``: ensemble size
+- ``q``: number of query points
+- ``E``: number of outputs
+
+Posterior construction is inherited from :class:`~mfbo.nn.ensembles.base._BaseEnsemble`.
+"""
+
 from typing import Callable
 
 import torch
@@ -26,11 +47,55 @@ LowFn = Callable[[Tensor], Tensor]
 
 class Ada2MFEnsemble(_BaseEnsemble):
     """
-    Deterministic Ada2MF ensemble.
+    Deterministic ensemble of Ada2MF networks for multi-fidelity regression.
 
-    Each Ada2MF net consumes (x, yL(x)) and outputs yH prediction.
-    - forward(X) returns samples [B, M, q, E]
-    - posterior(X) inherited from _BaseEnsemble
+    The ensemble approximates a high-fidelity mapping ``x -> y_H`` by combining:
+
+    - input features ``x`` of shape ``[N, d]``
+    - low-fidelity features ``y_L(x)`` produced by ``low_fn``
+
+    Each ensemble member is an independently initialized and trained
+    :class:`~mfbo.nn.ada2mf.Ada2MF` network.
+
+    Parameters
+    ----------
+    X_train : torch.Tensor
+        High-fidelity training inputs of shape ``[N, d]`` (or any tensor
+        flattenable to that).
+    y_train : torch.Tensor
+        High-fidelity training targets of shape ``[N]`` or ``[N, E]``.
+    low_fn : Callable[[torch.Tensor], torch.Tensor]
+        Low-fidelity function used to generate features ``y_L(x)``.
+        Must accept an input tensor of shape ``[N, d]`` and return either
+        ``[N]`` or ``[N, f_L]``.
+    ensemble_size : int, default=50
+        Number of ensemble members ``M``.
+    hid_features : int, default=5
+        Hidden layer width used inside each :class:`~mfbo.nn.ada2mf.Ada2MF`.
+    n_layers : int, default=2
+        Number of hidden layers used inside each :class:`~mfbo.nn.ada2mf.Ada2MF`.
+
+    Attributes
+    ----------
+    low_fn : Callable
+        Stored low-fidelity function.
+    nets : torch.nn.ModuleList
+        List of :class:`~mfbo.nn.ada2mf.Ada2MF` ensemble members.
+    train_x : torch.Tensor
+        Training inputs (high-fidelity locations), shape ``[N, d]``.
+    train_y : torch.Tensor
+        Training targets, shape ``[N, E]``.
+    ensemble_size : int
+        Number of ensemble members ``M``.
+    _num_outputs : int
+        Number of output dimensions ``E``.
+
+    Notes
+    -----
+    - The model is deterministic; predictive uncertainty is estimated from
+      disagreement across ensemble members.
+    - ``low_fn`` is evaluated at training time (for fitting) and at inference
+      time (inside :meth:`forward`).
     """
 
     def __init__(
@@ -74,10 +139,37 @@ class Ada2MFEnsemble(_BaseEnsemble):
         )
 
     def fit(self, cfg: FitConfig | None = None, **kwargs) -> None:
+        """
+        Fit all Ada2MF ensemble members independently.
+
+        Parameters
+        ----------
+        cfg : FitConfig or None, optional
+            Training configuration (optimizer, learning rate, loss type,
+            epochs, verbosity). If ``None``, defaults are used.
+        **kwargs
+            Legacy keyword arguments for training hyperparameters (e.g.,
+            ``optimizer``, ``epochs``, ``lr``, ``loss``, ``verbose``).
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Each ensemble member is trained on the same dataset, where the
+        low-fidelity features are computed as:
+
+        - ``y_L = low_fn(X_train)``
+
+        and the network learns a mapping:
+
+        - ``(X_train, y_L) -> y_train``
+
+        The ensemble members are trained independently with full-batch updates.
+        """
         cfg = cfg_from_legacy_kwargs(cfg, **kwargs)
-        """
-        Train each net independently on (train_x, low_fn(train_x)) -> train_y.
-        """
+
         loss_fn = nn.HuberLoss()
 
         X = self.train_x
@@ -105,8 +197,31 @@ class Ada2MFEnsemble(_BaseEnsemble):
 
     def forward(self, X: Tensor) -> Tensor:
         """
-        X: [d] or [q,d] or [B,q,d]
-        Returns samples: [B, M, q, E]
+        Evaluate ensemble predictions at query points.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Query inputs with shape ``[d]``, ``[q, d]``, or ``[B, q, d]``.
+
+        Returns
+        -------
+        torch.Tensor
+            Predictive samples with shape ``[B, M, q, E]`` where:
+
+            - ``B`` is the broadcast batch dimension
+            - ``M`` is the ensemble size
+            - ``q`` is the number of query points
+            - ``E`` is the number of outputs
+
+        Notes
+        -----
+        The inputs are normalized to ``[B, q, d]`` internally and flattened to
+        ``[B*q, d]`` for evaluation. Low-fidelity features are computed by
+
+        - ``y_L = low_fn(X)``
+
+        and each ensemble member predicts using ``Ada2MF(X, y_L)``.
         """
         Xb = normalize_to_bqd(X)     # [B,q,d]
         B, q, d = Xb.shape

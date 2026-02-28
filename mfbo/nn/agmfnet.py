@@ -4,44 +4,7 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
-
-
-def init_linear_kaiming(lin: nn.Linear, nonlinearity: str = "relu") -> None:
-    nn.init.kaiming_normal_(lin.weight, nonlinearity=nonlinearity)
-    if lin.bias is not None:
-        nn.init.zeros_(lin.bias)
-    """
-    Initialize a ``nn.Linear`` layer using Kaiming (He) initialization.
-
-    Parameters
-    ----------
-    lin : torch.nn.Linear
-        Linear layer to initialize.
-    nonlinearity : str, default="relu"
-        Nonlinearity used after the layer. Passed to
-        :func:`torch.nn.init.kaiming_normal_`.
-    """
-
-def make_mlp(
-    in_features: int,
-    hid_features: int,
-    n_layers: int,
-    activation: nn.Module,
-    out_features: int = 1,
-    bias: bool = True,
-) -> nn.Sequential:
-    layers: list[nn.Module] = []
-    last = in_features
-    for _ in range(n_layers):
-        lin = nn.Linear(last, hid_features, bias=bias)
-        init_linear_kaiming(lin)
-        layers += [lin, activation]
-        last = hid_features
-
-    out = nn.Linear(last, out_features, bias=bias)
-    init_linear_kaiming(out)
-    layers.append(out)
-    return nn.Sequential(*layers)
+from ..utils.init import init_linear_kaiming, make_mlp
 
 
 class AGMFNet(nn.Module):

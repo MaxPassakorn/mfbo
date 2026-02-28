@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Base utilities for neural ensemble surrogate models.
 
@@ -32,8 +34,6 @@ All ensemble surrogates follow these conventions:
 The training helper :func:`~mfbo.nn.ensembles.base._fit_ensemble_nets` fits each
 ensemble member independently using standard PyTorch optimization loops.
 """
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable, Literal

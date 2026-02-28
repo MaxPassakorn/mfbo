@@ -1,5 +1,31 @@
 from __future__ import annotations
 
+"""
+Deterministic MFNN ensemble surrogate.
+
+This module provides :class:`MFNNEnsemble`, an ensemble of independent
+Multi-Fidelity Neural Networks (MFNNs).
+
+Each ensemble member is trained on augmented inputs:
+
+    X_aug = concat([x, low_fn(x)], dim=-1)
+
+where ``low_fn`` is a user-supplied low-fidelity function.
+
+The ensemble returns predictive samples with shape:
+
+    samples: [B, M, q, E]
+
+where
+
+- B : broadcast batch dimension
+- M : ensemble size
+- q : number of query points
+- E : number of outputs
+
+Posterior construction is inherited from :class:`_BaseEnsemble`.
+"""
+
 from typing import Callable
 
 import torch
@@ -26,14 +52,64 @@ LowFn = Callable[[Tensor], Tensor]
 
 class MFNNEnsemble(_BaseEnsemble):
     """
-    Deterministic MFNN ensemble.
+    Deterministic ensemble of Multi-Fidelity Neural Networks (MFNN).
 
-    MFNN consumes augmented inputs:
-        X_aug = cat([x, low_fn(x)], dim=-1)
+    This model trains multiple independently initialized MFNNs on
+    augmented training inputs:
 
-    - Trains an ensemble of independent MFNNs on (X_aug_train, y_train).
-    - forward(X) returns samples with shape [B, M, q, E].
-    - posterior(X) is inherited from _BaseEnsemble and uses samples_to_mf_posterior.
+        X_aug = concat([x, low_fn(x)], dim=-1)
+
+    where ``low_fn`` provides low-fidelity predictions or features.
+
+    Ensemble diversity arises from independent random initialization
+    and optimization of each MFNN member.
+
+    Parameters
+    ----------
+    X_train : torch.Tensor
+        High-fidelity training inputs of shape ``[N, d]``.
+    y_train : torch.Tensor
+        High-fidelity training targets of shape ``[N]`` or ``[N, E]``.
+    low_fn : Callable[[torch.Tensor], torch.Tensor]
+        Low-fidelity function mapping ``x -> y_L``.
+        Must accept input of shape ``[N, d]`` and return
+        ``[N]`` or ``[N, f_L]``.
+    ensemble_size : int, default=50
+        Number of independent MFNN members ``M``.
+    hid_features : int, default=5
+        Width of hidden layers in each MFNN.
+    n_hid_layers : int, default=2
+        Number of hidden layers in each MFNN.
+    activation : torch.nn.Module or None, default=None
+        Activation function used in hidden layers.
+        If ``None``, the default activation of :class:`MFNN` is used.
+    bias : bool, default=True
+        Whether linear layers include bias terms.
+
+    Attributes
+    ----------
+    low_fn : Callable
+        Stored low-fidelity function.
+    nets : torch.nn.ModuleList
+        List of MFNN ensemble members.
+    train_x_raw : torch.Tensor
+        Original high-fidelity training inputs.
+    train_x : torch.Tensor
+        Augmented training inputs used for fitting.
+    train_y : torch.Tensor
+        High-fidelity targets.
+    ensemble_size : int
+        Number of ensemble members.
+    _num_outputs : int
+        Number of output dimensions ``E``.
+
+    Notes
+    -----
+    - The ensemble is deterministic; predictive uncertainty arises
+      from variability across independently trained members.
+    - The low-fidelity function is evaluated at both training and
+      inference time.
+    - No parameter sharing occurs between ensemble members.
     """
 
     def __init__(
@@ -85,14 +161,67 @@ class MFNNEnsemble(_BaseEnsemble):
     def fit(self, cfg: FitConfig | None = None, **kwargs) -> None:
         cfg = cfg_from_legacy_kwargs(cfg, **kwargs)
         """
-        Fit each MFNN on augmented training data.
+        Fit all MFNN ensemble members independently.
+
+        Parameters
+        ----------
+        cfg : FitConfig or None, optional
+            Training configuration controlling optimizer, learning rate,
+            loss function, and number of epochs.
+        **kwargs
+            Legacy keyword arguments for training hyperparameters
+            (e.g., ``optimizer``, ``epochs``, ``lr``, ``loss``, ``verbose``).
+
+        Returns
+        -------
+        None
+
+        Notes
+        -----
+        Each ensemble member is trained on the same augmented dataset:
+
+            X_aug_train = concat([X_train, low_fn(X_train)], dim=-1)
+
+        Training is full-batch and deterministic.
         """
         _fit_ensemble_nets(self.nets, self.train_x, self.train_y, cfg)
 
     def forward(self, X: Tensor) -> Tensor:
         """
-        X: [d] or [q,d] or [B,q,d]
-        Returns samples: [B, M, q, E]
+        Evaluate ensemble predictions at query points.
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            Query inputs with shape:
+
+            - ``[d]``
+            - ``[q, d]``
+            - ``[B, q, d]``
+
+        Returns
+        -------
+        torch.Tensor
+            Ensemble predictive samples with shape ``[B, M, q, E]`` where
+
+            - ``B`` : broadcast batch dimension
+            - ``M`` : ensemble size
+            - ``q`` : number of query points
+            - ``E`` : number of outputs
+
+        Notes
+        -----
+        - Inputs are normalized internally to shape ``[B, q, d]``.
+        - Low-fidelity features are computed as:
+
+              y_L = low_fn(X)
+
+        - The augmented input
+
+              X_aug = concat([X, y_L], dim=-1)
+
+          is passed to each MFNN member.
+        - For single-output models (``E=1``), the final dimension is retained.
         """
         Xb = normalize_to_bqd(X)     # [B,q,d]
         B, q, d = Xb.shape

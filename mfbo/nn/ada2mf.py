@@ -3,64 +3,7 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 import torch.nn as nn
-
-
-def init_linear_kaiming(lin: nn.Linear, nonlinearity: str = "relu") -> None:
-    """
-    Initialize a ``nn.Linear`` layer using Kaiming (He) initialization.
-
-    Parameters
-    ----------
-    lin : torch.nn.Linear
-        Linear layer to initialize.
-    nonlinearity : str, default="relu"
-        Nonlinearity used after the layer. Passed to
-        :func:`torch.nn.init.kaiming_normal_`.
-    """
-    nn.init.kaiming_normal_(lin.weight, nonlinearity=nonlinearity)
-    if lin.bias is not None:
-        nn.init.zeros_(lin.bias)
-
-
-def make_mlp(
-    in_features: int,
-    hid_features: int,
-    n_layers: int,
-    activation: nn.Module,
-    bias: bool = True,
-) -> nn.Sequential:
-    """
-    Construct a fully connected MLP ending in a scalar output.
-
-    Parameters
-    ----------
-    in_features : int
-        Input feature dimension.
-    hid_features : int
-        Width of hidden layers.
-    n_layers : int
-        Number of hidden layers.
-    activation : torch.nn.Module
-        Activation function applied after each hidden linear layer.
-    bias : bool, default=True
-        Whether linear layers include bias terms.
-
-    Returns
-    -------
-    torch.nn.Sequential
-        MLP mapping ``in_features -> 1``.
-    """
-    layers: list[nn.Module] = []
-    last = in_features
-    for _ in range(n_layers):
-        lin = nn.Linear(last, hid_features, bias=bias)
-        init_linear_kaiming(lin)
-        layers += [lin, activation]
-        last = hid_features
-    out = nn.Linear(last, 1, bias=bias)
-    init_linear_kaiming(out)
-    layers.append(out)
-    return nn.Sequential(*layers)
+from ..utils.init import init_linear_kaiming, make_mlp
 
 
 class Ada2MF(nn.Module):
@@ -174,12 +117,12 @@ class Ada2MF(nn.Module):
 
             # g2: MLP(cat) -> 1
             self.g2_heads.append(
-                make_mlp(cat_dim, hid_features, n_layers, self.activation, bias=bias)
+                make_mlp(cat_dim, hid_features, n_layers, self.activation, out_features=1, bias=bias)
             )
 
             # g3: MLP(x) -> 1
             self.g3_heads.append(
-                make_mlp(x_dim, hid_features, n_layers, self.activation, bias=bias)
+                make_mlp(x_dim, hid_features, n_layers, self.activation, out_features=1, bias=bias)
             )
 
         # alpha[e, 3] -> tanh -> weights in [-1,1]
