@@ -6,27 +6,77 @@ import torch.nn as nn
 
 
 def init_linear_kaiming(lin: nn.Linear, nonlinearity: str = "relu") -> None:
-    """Kaiming init for Linear layers."""
+    """
+    Initialize a ``nn.Linear`` layer using Kaiming (He) initialization.
+
+    Parameters
+    ----------
+    lin : torch.nn.Linear
+        Linear layer to initialize.
+    nonlinearity : str, default="relu"
+        Nonlinearity used after the layer. Passed to
+        :func:`torch.nn.init.kaiming_normal_`.
+    """
     nn.init.kaiming_normal_(lin.weight, nonlinearity=nonlinearity)
     if lin.bias is not None:
         nn.init.zeros_(lin.bias)
 
 
 class MLP(nn.Module):
-    """
-    Simple multi-head MLP.
+    r"""
+    Multi-head fully connected neural network.
 
-    - Input:  x shape [N, d] (or anything flattenable to that)
-    - Output: y shape [N] if out_features=1 else [N, out_features]
+    This module implements a standard multilayer perceptron (MLP)
+    with configurable depth and width. A separate output head is
+    constructed for each output dimension.
 
-    This is a base network only; training and BoTorch wrappers live elsewhere.
+    The network has the structure:
+
+    .. math::
+
+        x \rightarrow
+        \text{Linear} \rightarrow
+        \text{Activation} \rightarrow
+        \cdots \rightarrow
+        \text{Linear}_{\text{out}}
+
+    where each output dimension is modeled by an independent head.
+
+    Notes
+    -----
+    - Each output dimension uses its own MLP head.
+    - There is no shared final linear layer across outputs.
+    - This class defines only the neural architecture.
+      Training logic and Bayesian optimization wrappers are implemented
+      elsewhere in the library.
+
+    Parameters
+    ----------
+    in_features : int
+        Number of input features (dimension of input ``x``).
+    out_features : int, default=1
+        Number of output dimensions.
+    hid_features : int, default=5
+        Width of hidden layers.
+    n_hid_layers : int, default=2
+        Number of hidden layers.
+    activation : torch.nn.Module or None, default=None
+        Activation function applied after each hidden linear layer.
+        If ``None``, :class:`torch.nn.Mish` is used.
+    bias : bool, default=True
+        Whether linear layers include bias terms.
+
+    Attributes
+    ----------
+    heads : torch.nn.ModuleList
+        List of output heads (one per output dimension).
     """
 
     def __init__(
         self,
         in_features: int,
         out_features: int = 1,
-        hid_features: int = 64,
+        hid_features: int = 5,
         n_hid_layers: int = 2,
         activation: nn.Module | None = None,
         bias: bool = True,
@@ -68,7 +118,30 @@ class MLP(nn.Module):
             self.heads.append(nn.Sequential(*layers))
 
     def forward(self, x: Tensor) -> Tensor:
-        # flatten to [N, d]
+        """
+        Compute the network output.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape ``[N, d]`` or any tensor that can
+            be reshaped to that form. The first dimension is treated
+            as the batch dimension.
+
+        Returns
+        -------
+        torch.Tensor
+            If ``out_features == 1``:
+                Tensor of shape ``[N]``.
+
+            If ``out_features > 1``:
+                Tensor of shape ``[N, out_features]``.
+
+        Notes
+        -----
+        The input is flattened internally to shape ``[N, d]`` before
+        being passed through each output head.
+        """
         x = x.view(x.shape[0], -1)
 
         outs = [head(x).squeeze(-1) for head in self.heads]  # list of [N]

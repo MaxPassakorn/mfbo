@@ -10,7 +10,17 @@ def init_linear_kaiming(lin: nn.Linear, nonlinearity: str = "relu") -> None:
     nn.init.kaiming_normal_(lin.weight, nonlinearity=nonlinearity)
     if lin.bias is not None:
         nn.init.zeros_(lin.bias)
+    """
+    Initialize a ``nn.Linear`` layer using Kaiming (He) initialization.
 
+    Parameters
+    ----------
+    lin : torch.nn.Linear
+        Linear layer to initialize.
+    nonlinearity : str, default="relu"
+        Nonlinearity used after the layer. Passed to
+        :func:`torch.nn.init.kaiming_normal_`.
+    """
 
 def make_mlp(
     in_features: int,
@@ -36,29 +46,90 @@ def make_mlp(
 
 class AGMFNet(nn.Module):
     r"""
-    Adaptive Gated Multi-Fidelity Network (AGMFNet) base architecture.
+    Adaptive Gated Multi-Fidelity Network (AGMFNet).
 
-    For each output dim e:
-      cat = [x, y_L]
-      g1(cat) -> linear(cat)
-      g2(cat) -> MLP(cat)
-      g3(x)   -> MLP(x)
-      gate(cat) -> logits(3) -> softmax weights w (3)
+    AGMFNet is a deterministic multi-fidelity neural architecture that
+    adaptively blends linear and nonlinear components using a learned
+    gating mechanism.
 
-      y = w0*g1 + w1*g2 + w2*g3
+    For each output dimension :math:`e`, the model constructs three branches:
 
-    Input:
-      x   : [N, x_dim]
-      y_L : [N, yL_dim]  (low-fidelity outputs/features)
-    Output:
-      y: [N] if out_features=1 else [N, out_features]
+    - :math:`g_1(x, y_L)` — linear trend over concatenated inputs
+    - :math:`g_2(x, y_L)` — nonlinear correction over concatenated inputs
+    - :math:`g_3(x)` — nonlinear residual over high-fidelity inputs only
 
-    If return_parts=True, returns:
-      (mu, g1, g2, g3, w_gate, (s_H, s_LH, s_R))
-    where:
-      mu    : [N, E]
-      g1/g2/g3 : [N, E]
-      w_gate: [N, E, 3]
+    Let
+
+    .. math::
+
+        \text{cat} = [x, y_L].
+
+    The gating network produces logits
+
+    .. math::
+
+        \ell_e(\text{cat}) \in \mathbb{R}^3,
+
+    which are converted into convex weights
+
+    .. math::
+
+        w_e = \mathrm{softmax}(\ell_e) \in \mathbb{R}^3,
+        \quad \sum_{k=1}^{3} w_{e,k} = 1.
+
+    The final prediction is
+
+    .. math::
+
+        y_e(x, y_L)
+        = w_{e,0} g_1
+        + w_{e,1} g_2
+        + w_{e,2} g_3.
+
+    This adaptive gating allows the model to dynamically emphasize
+    linear structure, nonlinear interaction, or residual modeling
+    depending on the input region.
+
+    Notes
+    -----
+    - The architecture is fully deterministic.
+    - Each output dimension has independent branches and gating network.
+    - Mixing weights are input-dependent and constrained to form a convex
+      combination via softmax.
+    - Optional scalar parameters ``(s_H, s_LH, s_R)`` are included for
+      adaptive-fidelity-weight (AFW) logging but do not affect predictions.
+
+    Parameters
+    ----------
+    x_dim : int
+        Dimension of high-fidelity input features ``x``.
+    yL_dim : int, default=1
+        Dimension of low-fidelity inputs ``y_L``.
+    out_features : int, default=1
+        Number of output dimensions.
+    hid_features : int, default=5
+        Width of hidden layers in nonlinear branches and gating network.
+    n_layers : int, default=2
+        Number of hidden layers in nonlinear branches.
+    activation : torch.nn.Module or None, default=None
+        Activation function used in hidden layers.
+        If ``None``, :class:`torch.nn.Mish` is used.
+    bias : bool, default=True
+        Whether linear layers include bias terms.
+
+    Attributes
+    ----------
+    g1_heads : torch.nn.ModuleList
+        Linear branches over concatenated inputs.
+    g2_heads : torch.nn.ModuleList
+        Nonlinear MLP branches over concatenated inputs.
+    g3_heads : torch.nn.ModuleList
+        Nonlinear MLP branches over high-fidelity inputs.
+    gate_heads : torch.nn.ModuleList
+        Gating networks producing 3 logits per output dimension.
+    s_H, s_LH, s_R : torch.nn.Parameter
+        Optional scalar parameters (one per output dimension) used for
+        adaptive-fidelity-weight logging.
     """
 
     def __init__(
@@ -66,7 +137,7 @@ class AGMFNet(nn.Module):
         x_dim: int,
         yL_dim: int = 1,
         out_features: int = 1,
-        hid_features: int = 64,
+        hid_features: int = 5,
         n_layers: int = 2,
         activation: nn.Module | None = None,
         bias: bool = True,
@@ -119,6 +190,48 @@ class AGMFNet(nn.Module):
         self.s_R = nn.Parameter(torch.zeros(out_features))
 
     def forward(self, x: Tensor, y_L: Tensor, return_parts: bool = False):
+        """
+        Compute the AGMFNet prediction.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            High-fidelity input tensor of shape ``[N, x_dim]``.
+        y_L : torch.Tensor
+            Low-fidelity input tensor of shape ``[N, yL_dim]``.
+        return_parts : bool, default=False
+            If ``True``, also return intermediate branch outputs and gating weights.
+
+        Returns
+        -------
+        torch.Tensor
+            If ``out_features == 1``:
+                Tensor of shape ``[N]``.
+
+            If ``out_features > 1``:
+                Tensor of shape ``[N, out_features]``.
+
+        Or, if ``return_parts=True``:
+
+        tuple
+            ``(mu, g1, g2, g3, w_gate, (s_H, s_LH, s_R))`` where
+
+            - ``mu`` : Tensor of shape ``[N, E]``
+            - ``g1, g2, g3`` : Tensors of shape ``[N, E]``
+            - ``w_gate`` : Tensor of shape ``[N, E, 3]``
+            - ``(s_H, s_LH, s_R)`` : Tuple of learnable scalars
+
+        Raises
+        ------
+        RuntimeError
+            If input dimensions do not match configured ``x_dim`` or ``yL_dim``.
+
+        Notes
+        -----
+        Inputs are internally flattened to shape ``[N, d]``.
+        Gating weights are computed via softmax over 3 logits per output
+        dimension, ensuring a convex combination of branches.
+        """
         x = x.view(x.shape[0], -1)
         y_L = y_L.view(y_L.shape[0], -1)
 

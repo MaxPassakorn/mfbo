@@ -38,8 +38,8 @@ class AGMFNetEnsemble(_BaseEnsemble):
         X_train: Tensor,
         y_train: Tensor,
         low_fn: LowFn,
-        ensemble_size: int = 5,
-        hid_features: int = 64,
+        ensemble_size: int = 50,
+        hid_features: int = 5,
         n_layers: int = 2,
     ) -> None:
         super().__init__(ensemble_size=ensemble_size)
