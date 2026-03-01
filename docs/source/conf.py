@@ -2,6 +2,7 @@
 
 import os
 import sys
+from importlib.metadata import version as _version
 
 # Make project importable (mfbo)
 sys.path.insert(0, os.path.abspath("../.."))
@@ -15,7 +16,7 @@ sys.path.insert(0, os.path.abspath("../.."))
 project = 'mfbo'
 copyright = '2026, Passakorn Paladaechanan'
 author = 'Passakorn Paladaechanan'
-release = '0.1.1'
+release = _version("mfbo")
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
