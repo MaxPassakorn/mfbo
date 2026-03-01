@@ -52,3 +52,5 @@ napoleon_numpy_docstring = True
 napoleon_google_docstring = False
 napoleon_use_param = False
 napoleon_use_rtype = False
+
+autodoc_mock_imports = ["torch", "gpytorch", "botorch"]
