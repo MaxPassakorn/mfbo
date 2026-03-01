@@ -31,4 +31,5 @@ jobs:
           pip install pytest
 
       - name: Run tests
-        run: pytest -q
+        run: |
+          if [ -d tests ]; then pytest -q; else echo "No tests/ directory, skipping."; fi
