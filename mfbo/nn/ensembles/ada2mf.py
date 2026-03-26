@@ -107,7 +107,7 @@ class Ada2MFEnsemble(_BaseEnsemble):
         hid_features: int = 5,
         n_layers: int = 2,
     ) -> None:
-        super().__init__(ensemble_size=ensemble_size)
+        super().__init__(ensemble_size=ensemble_size, num_outputs=y_train.shape[-1])
 
         if low_fn is None:
             raise ValueError("low_fn must be provided for Ada2MFEnsemble.")

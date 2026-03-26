@@ -105,7 +105,7 @@ class MLPEnsemble(_BaseEnsemble):
         activation: nn.Module | None = None,
         bias: bool = True,
     ) -> None:
-        super().__init__(ensemble_size=ensemble_size)
+        super().__init__(ensemble_size=ensemble_size, num_outputs=y_train.shape[-1])
 
         X_train = ensure_2d_X(X_train)
         y_train = ensure_2d_y(y_train)
